@@ -6,6 +6,8 @@ Give [Hermes Agent](https://github.com/NousResearch/hermes-agent) a cloud browse
 
 ## Quickstart
 
+You need [Hermes Agent](https://github.com/NousResearch/hermes-agent) 0.18.0+ and a [Steel account](https://app.steel.dev) — the free plan is fine.
+
 ```bash
 hermes plugins install steel-dev/hermes-steel --enable
 hermes config set browser.cloud_provider steel
@@ -21,12 +23,10 @@ Done. Ask Hermes to browse something:
 
 Its first report will confirm the session runs on Steel and include a live-viewer link (`https://app.steel.dev/sessions/<id>`) so you can watch it work in real time.
 
-Requires Hermes Agent 0.18.0 or newer. Update anytime with `hermes plugins update browser-steel`.
-
 > [!NOTE]
-> **CAPTCHA solving and Steel-provided proxies require a verified Launch account.** Verify by adding $10 in paid balance — free credits don't count. The deposit goes toward usage, not an extra fee. Scale includes anti-bot; Enterprise is custom. See [pricing & limits](https://docs.steel.dev/overview/pricinglimits).
+> **Works out of the box on Steel's free plan.** Residential proxies and CAPTCHA solving additionally require a verified Launch account — verify by adding $10 in paid balance (free credits don't count; the deposit goes toward usage). See [pricing & limits](https://docs.steel.dev/overview/pricinglimits).
 >
-> Enabling these on a free account is safe: if Steel declines them, the plugin creates the session without them and the agent tells you what was dropped and how to unlock it. Likewise, when a page looks bot-protected, the agent points out which of these features would help — it never enables paid features on its own.
+> Enabling these on a free account is safe: if Steel declines them, the plugin creates the session without them and the agent tells you what was dropped and how to unlock it.
 
 ## What you get
 
@@ -49,7 +49,9 @@ hermes config set browser.steel.solve_captcha true
 | `browser.steel.base_url` | `STEEL_BASE_URL` | `https://api.steel.dev` | Steel API endpoint; a custom URL enables self-hosted mode |
 | `browser.steel.use_proxy` | `STEEL_USE_PROXY` | `false` | Residential proxy for sessions and scrapes |
 | `browser.steel.solve_captcha` | `STEEL_SOLVE_CAPTCHA` | `false` | CAPTCHA solving |
-| `browser.steel.session_timeout` | `STEEL_SESSION_TIMEOUT` | `1800000` (30 min) | Session hard cap in milliseconds. Steel's own default is 5 minutes, which kills long agent tasks mid-flight; the plugin also sets a 10-minute server-side inactivity timeout as crash insurance |
+| `browser.steel.session_timeout` | `STEEL_SESSION_TIMEOUT` | `1800000` (30 min) | Session hard cap in milliseconds |
+
+The 30-minute default replaces Steel's own 5-minute one, which kills long agent tasks mid-flight; the plugin also sets a 10-minute server-side inactivity timeout as crash insurance.
 
 Precedence is **agent override → env var → config → default**: the agent's per-session choices (via `steel_session_options`) win, then `STEEL_*` env vars, then `browser.steel.*` config. So config sets your persistent baseline while the agent tunes individual sessions on top of it.
 
@@ -62,19 +64,32 @@ hermes plugins update browser-steel     # pull the latest version
 hermes plugins remove browser-steel     # uninstall
 ```
 
-For plugin development, symlink a working copy instead so edits apply without reinstalling:
+When removing, also switch the backend selection back — otherwise Hermes warns about the missing Steel provider on every browse:
+
+```bash
+hermes config set browser.cloud_provider local
+```
+
+## Troubleshooting
+
+- **The agent never mentions Steel / browses locally** — you skipped `hermes config set browser.cloud_provider steel` (see Quickstart). Steel is never auto-selected.
+- **The agent reports proxy/CAPTCHA "were dropped"** — your Steel account isn't verified; unlock them at [billing](https://app.steel.dev/settings/billing).
+- **Still blocked by a bot wall** — the agent retries with proxy/CAPTCHA via `steel_session_options` on its own, but on an unverified account those features silently run disabled, so hard anti-bot sites stay out of reach until you verify.
+- **Not sure it's working?** — the agent's first browse report includes the live-viewer link; open it and watch the session.
+
+## How it works
+
+Steel exposes a standard CDP websocket per session. The provider creates a session via `POST /v1/sessions`, normalizes the returned `websocketUrl` (Steel omits the `/` path segment, which makes some CDP clients send a malformed request-line and get `400 Bad Request` on the websocket upgrade), and hands the URL to Hermes' provider-agnostic browser stack. The API key is appended only when configured, so unauthenticated self-hosted endpoints receive no auth header or query parameter. No Steel CLI, no separate Python packaging — the plugin runs inside Hermes' own environment. Browsing runs on Steel's infrastructure; the API key stays in `~/.hermes/.env` and the plugin sends nothing anywhere except the Steel API you configured.
+
+## Development
+
+Symlink a working copy so edits apply without reinstalling:
 
 ```bash
 git clone https://github.com/steel-dev/hermes-steel
 ln -s "$(pwd)/hermes-steel" ~/.hermes/plugins/browser-steel
 hermes plugins enable browser-steel
 ```
-
-## How it works
-
-Steel exposes a standard CDP websocket per session. The provider creates a session via `POST /v1/sessions`, normalizes the returned `websocketUrl` (Steel omits the `/` path segment, which makes some CDP clients send a malformed request-line and get `400 Bad Request` on the websocket upgrade), and hands the URL to Hermes' provider-agnostic browser stack. The API key is appended only when configured, so unauthenticated self-hosted endpoints receive no auth header or query parameter. No Steel CLI, no separate Python packaging — the plugin runs inside Hermes' own environment.
-
-## Development
 
 Tests need a hermes-agent source tree — clone it as a sibling directory or set `HERMES_AGENT_PATH`:
 
