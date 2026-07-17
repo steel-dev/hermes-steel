@@ -1,0 +1,9 @@
+# ABOUTME: Dev tooling config for the hermes-steel plugin repository.
+# ABOUTME: The plugin installs via `hermes plugins install`, not pip — no build config.
+#
+# Runtime requirements (enforced by the host at load time, not by pip):
+#   - hermes-agent >= 0.18.0 (the browser-provider plugin architecture)
+#   - requests (ships with hermes-agent)
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

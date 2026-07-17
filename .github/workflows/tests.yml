@@ -1,0 +1,82 @@
+# ABOUTME: CI — runs the plugin test suite against a fresh hermes-agent
+# ABOUTME: checkout (unit + integration; e2e auto-skips without STEEL_API_KEY).
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          path: hermes-steel
+          persist-credentials: false
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          repository: NousResearch/hermes-agent
+          path: hermes-agent
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+      - name: Run tests
+        working-directory: hermes-steel
+        run: uv run --locked --project ../hermes-agent --extra dev pytest -q
+
+  install:
+    runs-on: ubuntu-latest
+    env:
+      HERMES_HOME: /tmp/hermes-steel-install-home
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          path: hermes-steel
+          persist-credentials: false
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          repository: NousResearch/hermes-agent
+          path: hermes-agent
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+      - name: Install plugin through the real hermes installer
+        working-directory: hermes-agent
+        run: |
+          mkdir -p "$HERMES_HOME"
+          # actions/checkout leaves HEAD detached; give the commit a branch so
+          # `git clone file://…` resolves it as the default branch.
+          git -C ../hermes-steel branch ci-install-check || true
+          uv run --locked hermes plugins install \
+            "file://$(cd ../hermes-steel && pwd)" --enable
+      - name: Verify provider and tool registration
+        working-directory: hermes-agent
+        run: |
+          uv run --locked python - <<'PY'
+          from hermes_cli.plugins import get_plugin_manager
+
+          manager = get_plugin_manager()
+          manager.discover_and_load(force=True)
+          loaded = {
+              key: plugin
+              for key, plugin in manager._plugins.items()
+              if "steel" in key
+          }
+          assert "browser-steel" in loaded, loaded
+          assert loaded["browser-steel"].enabled, loaded["browser-steel"].error
+
+          from agent.browser_registry import _resolve
+
+          provider = _resolve("steel")
+          assert provider is not None
+          assert provider.name == "steel"
+
+          from tools.registry import registry
+
+          tool = registry.get_entry("steel_scrape")
+          assert tool is not None
+          assert tool.toolset == "browser"
+          PY

@@ -1,0 +1,56 @@
+# ABOUTME: Scheduled/manual live integration test against Steel's hosted API.
+# ABOUTME: Exercises Hermes -> agent-browser -> Steel and always cleans up.
+name: live e2e
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 6 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: steel-live-e2e
+  cancel-in-progress: false
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      HAS_STEEL_API_KEY: ${{ secrets.STEEL_API_KEY != '' }}
+    steps:
+      - name: Skip when the repository secret is unavailable
+        if: ${{ env.HAS_STEEL_API_KEY != 'true' }}
+        run: echo "STEEL_API_KEY is not configured; skipping the live test."
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        if: ${{ env.HAS_STEEL_API_KEY == 'true' }}
+        with:
+          path: hermes-steel
+          persist-credentials: false
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        if: ${{ env.HAS_STEEL_API_KEY == 'true' }}
+        with:
+          repository: NousResearch/hermes-agent
+          ref: 8b209e0dd7b8e308d5b923fa80f7a72f71042636
+          path: hermes-agent
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+        if: ${{ env.HAS_STEEL_API_KEY == 'true' }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        if: ${{ env.HAS_STEEL_API_KEY == 'true' }}
+        with:
+          node-version: 22
+      - name: Install agent-browser
+        if: ${{ env.HAS_STEEL_API_KEY == 'true' }}
+        run: npm install --global "agent-browser@0.26.0"
+      - name: Run live Steel tests
+        if: ${{ env.HAS_STEEL_API_KEY == 'true' }}
+        working-directory: hermes-steel
+        env:
+          STEEL_API_KEY: ${{ secrets.STEEL_API_KEY }}
+          # Bound billing even if the runner is cancelled before pytest's
+          # finally block can release the session. Value is milliseconds.
+          STEEL_SESSION_TIMEOUT: "600000"
+        run: uv run --locked --project ../hermes-agent --extra dev pytest -q tests/test_e2e.py

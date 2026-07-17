@@ -1,0 +1,12 @@
+name: browser-steel
+version: 1.0.0
+description: "Steel (https://steel.dev) cloud browser backend + steel_scrape tool. Cloud Steel requires STEEL_API_KEY; custom self-hosted endpoints may run without one. Supports residential proxies, CAPTCHA solving, and a live session viewer."
+author: "Steel (Nen Labs, Inc.)"
+kind: backend
+provides_browser_providers:
+  - steel
+requires_env:
+  - name: STEEL_API_KEY
+    description: "Steel API key — required for Steel cloud; press Enter to skip for a self-hosted STEEL_BASE_URL endpoint"
+    url: "https://app.steel.dev/settings/api-keys"
+    secret: true
