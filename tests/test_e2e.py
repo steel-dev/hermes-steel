@@ -130,4 +130,5 @@ class TestLiveScrape:
     def test_scrape_example_dot_com(self, _live_key: None) -> None:
         result = json.loads(steel_scrape("https://example.com"))
         assert "error" not in result, result
-        assert "Example Domain" in result["content"]
+        assert result.get("title") == "Example Domain"
+        assert "documentation examples" in result["content"]
