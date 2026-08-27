@@ -10,12 +10,15 @@ that on. The model relays it naturally ("browsing on Steel — watch live at
 …"), which both informs the user and lets them verify the session is theirs.
 
 One note per Steel session; silent for every other provider and tool.
+Handoff detection (:mod:`hermes_steel.handoff`) composes into the same hook.
 """
 
 from __future__ import annotations
 
 import logging
 from typing import Any, Dict, Optional
+
+from . import handoff
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +98,13 @@ def steel_session_note(
             if hint:
                 _hinted_session_ids.add(session_id)
                 parts.append(hint)
+        # Pages that need a person (sign-in, CAPTCHA, 2FA) ride along on this
+        # hook rather than registering their own: the host applies the first
+        # string a transform_tool_result hook returns, so a second hook's note
+        # would be silently dropped whenever this one also had something to say.
+        handoff_note = handoff.handoff_note_for(session, result)
+        if handoff_note:
+            parts.append(handoff_note)
 
         if not parts:
             return None

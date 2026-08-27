@@ -33,6 +33,7 @@ Its first report will confirm the session runs on Steel and include a live-viewe
 - **Cloud browser automation** — every `browser_*` tool (`browser_navigate`, `browser_click`, `browser_screenshot`, …) runs in a Steel session, with optional residential proxies and CAPTCHA solving.
 - **`steel_scrape`** — server-side page extraction to clean markdown or HTML via Steel's `/v1/scrape` API. No browser session needed, and it works with just the API key (no `cloud_provider` change).
 - **An agent that knows its backend** — Hermes' browser tools are provider-agnostic, so the plugin tags the first browser result of each session with the backend name and viewer link. The agent tells you it's browsing on Steel instead of guessing about its own infrastructure.
+- **Handoff detection** — when a page needs a person (sign-in wall, CAPTCHA, two-factor code, payment confirmation), the plugin says so in the tool result and restates the viewer link, so the agent stops retrying and asks you to finish the step in the viewer — tap the link on your phone, complete the login, and the agent carries on in the same session.
 - **Self-tuning anti-bot** — the agent can call `steel_session_options` to toggle residential proxy and CAPTCHA solving per site and start a fresh session, deciding for itself when a page needs them (and when it works better without). No config edit or restart; it reacts to what it sees.
 
 ## Configuration
@@ -50,6 +51,7 @@ hermes config set browser.steel.solve_captcha true
 | `browser.steel.use_proxy` | `STEEL_USE_PROXY` | `false` | Residential proxy for sessions and scrapes |
 | `browser.steel.solve_captcha` | `STEEL_SOLVE_CAPTCHA` | `false` | CAPTCHA solving |
 | `browser.steel.session_timeout` | `STEEL_SESSION_TIMEOUT` | `1800000` (30 min) | Session hard cap in milliseconds |
+| `browser.steel.handoff_detection` | `STEEL_HANDOFF_DETECTION` | `true` | Flag pages that need human input and point the agent at the live viewer |
 
 The 30-minute default replaces Steel's own 5-minute one, which kills long agent tasks mid-flight; the plugin also sets a 10-minute server-side inactivity timeout as crash insurance.
 
