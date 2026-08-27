@@ -21,7 +21,11 @@ def register(ctx) -> None:
     ctx.register_browser_provider(SteelBrowserProvider())
 
     # Tag the first browser_* result of each Steel session with the backend
-    # name and live-viewer URL so the agent can pass both on to the user.
+    # name and live-viewer URL so the agent can pass both on to the user, and
+    # flag pages that need a human (sign-in, CAPTCHA, 2FA) so it hands off via
+    # that viewer link instead of retrying. Both live behind this one hook: the
+    # host uses the first string a transform_tool_result callback returns, so a
+    # second registration would have its note dropped.
     ctx.register_hook("transform_tool_result", session_note.steel_session_note)
 
     ctx.register_tool(

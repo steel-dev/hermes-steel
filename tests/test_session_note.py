@@ -241,7 +241,11 @@ class TestSteelSessionNote:
             result="Verify you are human",
             task_id=None,
         )
-        assert out is None
+        # Handoff detection may still speak up — a CAPTCHA with both features
+        # already enabled is exactly when a human is needed. What must not
+        # appear is more anti-bot advice with nothing left to enable.
+        assert "bot-protected" not in (out or "")
+        assert "steel_session_options" not in (out or "")
 
     @pytest.mark.parametrize(
         "block_text",
