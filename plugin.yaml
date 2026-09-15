@@ -10,3 +10,8 @@ requires_env:
     description: "Steel API key — required for Steel cloud; press Enter to skip for a self-hosted STEEL_BASE_URL endpoint"
     url: "https://app.steel.dev/settings/api-keys"
     secret: true
+provides_tools:
+  - steel_scrape
+  - steel_session_options
+provides_hooks:
+  - transform_tool_result
