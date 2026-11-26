@@ -25,11 +25,27 @@ _noted_session_ids: set[str] = set()
 _hinted_session_ids: set[str] = set()
 
 
+def _get_cloud_provider() -> Any:
+    """Resolve the active cloud provider across Hermes module layouts.
+
+    Hermes v2026.9 split provider resolution out of ``tools.browser_tool``;
+    older hosts still expose it there. Keep the hook working on both.
+    """
+    try:
+        from tools import browser_tool_cloud
+
+        return browser_tool_cloud._get_cloud_provider()
+    except (ImportError, AttributeError):
+        from tools import browser_tool
+
+        return browser_tool._get_cloud_provider()
+
+
 def _steel_session_for_task(task_id: Optional[str]) -> Optional[Dict[str, Any]]:
     """Return the task's active session when the Steel provider services it."""
     from tools import browser_tool
 
-    provider = browser_tool._get_cloud_provider()
+    provider = _get_cloud_provider()
     if provider is None or getattr(provider, "name", "") != "steel":
         return None
 
@@ -138,13 +154,15 @@ def _backend_note(session: Dict[str, Any]) -> str:
         # without the plugin having to detect the block page itself.
         note += (
             " For your own reference: if a site blocks automated access,"
-            " Steel supports residential proxies and CAPTCHA solving —"
-            " currently disabled. You can turn them on yourself by calling"
-            " the steel_session_options tool (use_proxy / solve_captcha),"
-            " then calling browser_navigate again — no need to ask the user"
-            " first. Some sites also work better without a proxy, so you can"
-            " toggle either off the same way. Paid features need a verified"
-            " Steel account; without one the session just runs without them."
+            " Dataimpulse residential proxies and CAPTCHA solving are"
+            " available but currently disabled. You can turn them on yourself"
+            " by calling the steel_session_options tool (use_proxy=true with"
+            " proxy_country set to an ISO code such as \"DE\", and/or"
+            " solve_captcha=true), then calling browser_navigate again — no"
+            " need to ask the user first. Some sites also work better without"
+            " a proxy, so you can toggle either off the same way. CAPTCHA"
+            " solving needs a verified Steel account; without one the session"
+            " runs without it."
         )
     return note
 
@@ -200,11 +218,12 @@ def _block_hint(session: Dict[str, Any]) -> Optional[str]:
             " new session."
         )
     return (
-        "This page appears bot-protected. This Steel session has residential"
-        " proxies and CAPTCHA solving disabled. Call the steel_session_options"
-        " tool with use_proxy=true (and/or solve_captcha=true), then"
-        " browser_navigate again to retry through a residential proxy — you"
-        " don't need to ask the user first. These features require a verified"
-        " Steel account; without one the retry just runs without them, so say"
-        " so and stop rather than looping."
+        "This page appears bot-protected. This Steel session has the"
+        " Dataimpulse residential proxy and CAPTCHA solving disabled. Call the"
+        " steel_session_options tool with use_proxy=true and proxy_country set"
+        " to an ISO code such as \"DE\" (and/or solve_captcha=true), then"
+        " browser_navigate again to retry through the proxy — you don't need"
+        " to ask the user first. CAPTCHA solving requires a verified Steel"
+        " account; without one the retry runs without it, so say so and stop"
+        " rather than looping."
     )

@@ -36,7 +36,7 @@ def _fresh_state(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(session_note, "_hinted_session_ids", set())
     monkeypatch.setattr(browser_tool, "_active_sessions", {}, raising=True)
     monkeypatch.setattr(
-        browser_tool, "_get_cloud_provider", lambda: SteelBrowserProvider()
+        session_note, "_get_cloud_provider", lambda: SteelBrowserProvider()
     )
     return browser_tool
 
@@ -313,7 +313,7 @@ class TestSteelSessionNote:
         self, _fresh_state, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         _fresh_state._active_sessions["default"] = _steel_session()
-        monkeypatch.setattr(_fresh_state, "_get_cloud_provider", lambda: None)
+        monkeypatch.setattr(session_note, "_get_cloud_provider", lambda: None)
         assert steel_session_note(
             tool_name="browser_navigate", args={}, result="r", task_id=None
         ) is None
@@ -335,7 +335,7 @@ class TestSteelSessionNote:
         def _boom():
             raise RuntimeError("host internals moved")
 
-        monkeypatch.setattr(_fresh_state, "_get_cloud_provider", _boom)
+        monkeypatch.setattr(session_note, "_get_cloud_provider", _boom)
         assert steel_session_note(
             tool_name="browser_navigate", args={}, result="r", task_id=None
         ) is None

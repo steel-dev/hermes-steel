@@ -68,9 +68,18 @@ class TestPluginDiscovery:
                 }
             },
         )
-        monkeypatch.setattr(
-            browser_tool, "_get_cloud_provider", lambda: SteelBrowserProvider()
-        )
+        try:
+            from tools import browser_tool_cloud
+
+            monkeypatch.setattr(
+                browser_tool_cloud,
+                "_get_cloud_provider",
+                lambda: SteelBrowserProvider(),
+            )
+        except ImportError:
+            monkeypatch.setattr(
+                browser_tool, "_get_cloud_provider", lambda: SteelBrowserProvider()
+            )
         hook_results = invoke_hook(
             "transform_tool_result",
             tool_name="browser_navigate",

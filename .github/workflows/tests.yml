@@ -21,6 +21,7 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           repository: NousResearch/hermes-agent
+          ref: e3dd27ee2d8b011737a4eea8e3eb3d711ab78690  # v2026.9.24
           path: hermes-agent
           persist-credentials: false
       - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
@@ -40,6 +41,7 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           repository: NousResearch/hermes-agent
+          ref: e3dd27ee2d8b011737a4eea8e3eb3d711ab78690  # v2026.9.24
           path: hermes-agent
           persist-credentials: false
       - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
