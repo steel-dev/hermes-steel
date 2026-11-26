@@ -101,6 +101,11 @@ def _isolate_env(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
         "STEEL_USE_PROXY",
         "STEEL_SOLVE_CAPTCHA",
         "STEEL_SESSION_TIMEOUT",
+        "STEEL_PROXY_COUNTRY",
+        "DATAIMPULSE_PROXY_HOST",
+        "DATAIMPULSE_PROXY_PORT",
+        "DATAIMPULSE_PROXY_USERNAME",
+        "DATAIMPULSE_PROXY_PASSWORD",
         # Cleared so registry-resolution tests can't be perturbed by another
         # provider's credentials in the ambient environment.
         "BROWSERBASE_API_KEY",
