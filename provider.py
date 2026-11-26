@@ -31,11 +31,16 @@ Cloud auth env vars::
 Optional feature knobs::
 
     STEEL_BASE_URL=...           # default https://api.steel.dev; self-hosted may omit key
-    STEEL_USE_PROXY=true         # default false — residential proxy
+    STEEL_USE_PROXY=true         # default false — Dataimpulse residential proxy
+    STEEL_PROXY_COUNTRY=DE       # ISO 3166-1 alpha-2; required when proxy is on
     STEEL_SOLVE_CAPTCHA=true     # default false — CAPTCHA solving
     STEEL_SESSION_TIMEOUT=...     # milliseconds, integer; default 1800000
                                   # (30 min — Steel's own 5-min default kills
                                   # long agent tasks mid-flight)
+
+Dataimpulse proxy credentials are read from ``DATAIMPULSE_PROXY_HOST``,
+``DATAIMPULSE_PROXY_PORT``, ``DATAIMPULSE_PROXY_USERNAME`` and
+``DATAIMPULSE_PROXY_PASSWORD``.
 """
 
 from __future__ import annotations
@@ -58,6 +63,7 @@ from .config import (
     steel_base_url,
     steel_setting,
 )
+from .dataimpulse import build_dataimpulse_proxy_url
 
 logger = logging.getLogger(__name__)
 
@@ -188,22 +194,29 @@ class SteelBrowserProvider(BrowserProvider):
         task_digest = hashlib.sha256(task_bytes).hexdigest()[:12]
         session_name = f"hermes_{task_digest}_{uuid.uuid4().hex[:8]}"
 
-        requested_proxy = _truthy(steel_setting("STEEL_USE_PROXY", "use_proxy"))
-        requested_captcha = _truthy(
-            steel_setting("STEEL_SOLVE_CAPTCHA", "solve_captcha")
+        requested_proxy = _truthy(
+            steel_setting("STEEL_USE_PROXY", "use_proxy", task_id)
         )
-        # enable_* track the final request state (may be stripped on a 402
-        # retry); requested_* preserve the original intent for degradation
-        # detection.
+        requested_captcha = _truthy(
+            steel_setting("STEEL_SOLVE_CAPTCHA", "solve_captcha", task_id)
+        )
+        # enable_* track the final request state (CAPTCHA may be stripped on a
+        # 402 retry); requested_* preserve the original intent.
         enable_proxy, enable_captcha = requested_proxy, requested_captcha
 
         session_config: Dict[str, object] = {}
         if enable_proxy:
-            session_config["useProxy"] = True
+            # An explicit proxy request must fail loudly: never retry without
+            # it or let the session fall back to direct browsing.
+            session_config["proxyUrl"] = build_dataimpulse_proxy_url(
+                steel_setting("STEEL_PROXY_COUNTRY", "proxy_country", task_id) or ""
+            )
         if enable_captcha:
             session_config["solveCaptcha"] = True
 
-        custom_timeout_ms = steel_setting("STEEL_SESSION_TIMEOUT", "session_timeout")
+        custom_timeout_ms = steel_setting(
+            "STEEL_SESSION_TIMEOUT", "session_timeout", task_id
+        )
         custom_timeout = False
         if custom_timeout_ms:
             try:
@@ -240,34 +253,30 @@ class SteelBrowserProvider(BrowserProvider):
         response = _post_session(session_config)
 
         # Free-tier degradation: Steel answers 402 when the account's plan
-        # doesn't include a requested paid feature (proxy / CAPTCHA solving).
-        # The plugin must work out of the box on a free account, so strip
-        # the paid flags, retry once, and record what was dropped — the
-        # session-note hook tells the user how to unlock the features.
+        # doesn't include CAPTCHA solving. Strip CAPTCHA only and retry once.
+        # A requested custom proxy is never removed: the agent asked for it
+        # explicitly, so a failure must surface instead of browsing directly.
         degraded_features: list = []
         degradation_reason = ""
-        if response.status_code == 402 and (enable_proxy or enable_captcha):
+        if response.status_code == 402 and enable_captcha:
             degradation_reason = _api_error_message(response)
-            degraded_features = [
-                name
-                for requested, name in (
-                    (enable_proxy, "proxy"),
-                    (enable_captcha, "captcha_solving"),
-                )
-                if requested
-            ]
-            session_config.pop("useProxy", None)
+            degraded_features = ["captcha_solving"]
             session_config.pop("solveCaptcha", None)
-            enable_proxy = enable_captcha = False
+            enable_captcha = False
             logger.warning(
-                "Steel rejected paid features (402: %s) — retrying session "
-                "create without %s",
+                "Steel rejected CAPTCHA solving (402: %s) — retrying session "
+                "create without it",
                 degradation_reason,
-                ", ".join(degraded_features),
             )
             response = _post_session(session_config)
 
         if not response.ok:
+            if response.status_code == 402 and requested_proxy:
+                raise RuntimeError(
+                    "Steel rejected the Dataimpulse proxy session (HTTP 402). "
+                    "The proxy was not removed, so no direct session was "
+                    "created. Check the Steel account plan or proxy settings."
+                )
             message = (
                 f"Failed to create Steel session: "
                 f"{response.status_code} {response.text}"
@@ -327,33 +336,23 @@ class SteelBrowserProvider(BrowserProvider):
                 f"{websocket_url!r}"
             ) from exc
 
-        # Report what Steel actually granted, not what we requested. The
-        # create response carries the real state: proxySource ("steel" /
-        # "external" / null) and solveCaptcha. An account can silently run
-        # without a requested feature (200, feature omitted) rather than
-        # returning 402 — treat that as degradation too. When the fields are
-        # absent (self-hosted / older API), we can't verify, so fall back to
-        # the final requested state.
-        if "proxySource" in session_data:
-            proxy_active = bool(session_data.get("proxySource"))
-        else:
-            proxy_active = enable_proxy
+        # A custom proxyUrl is accepted as requested; connection failures
+        # surface during navigation, not as a silent direct session. CAPTCHA
+        # state is reported from the response so a silent downgrade is visible.
+        proxy_active = requested_proxy
         if "solveCaptcha" in session_data:
             captcha_active = bool(session_data.get("solveCaptcha"))
         else:
             captcha_active = enable_captcha
 
-        for was_requested, is_active, feature_name in (
-            (requested_proxy, proxy_active, "proxy"),
-            (requested_captcha, captcha_active, "captcha_solving"),
-        ):
-            if was_requested and not is_active and feature_name not in degraded_features:
-                degraded_features.append(feature_name)
-        if degraded_features and not degradation_reason:
-            degradation_reason = (
-                "Steel created the session without a requested feature — the "
-                "account's plan may not include it."
-            )
+        if requested_captcha and not captcha_active:
+            if "captcha_solving" not in degraded_features:
+                degraded_features.append("captcha_solving")
+            if not degradation_reason:
+                degradation_reason = (
+                    "Steel created the session without CAPTCHA solving — the "
+                    "account's plan may not include it."
+                )
 
         features_enabled = {
             "proxy": proxy_active,

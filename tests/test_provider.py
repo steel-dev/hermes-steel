@@ -190,20 +190,19 @@ class TestCreateSession:
 
         assert post.call_args.args[0] == "https://api.steel.dev/v1/sessions"
 
-    def test_402_with_features_degrades_instead_of_failing(
+    def test_402_with_captcha_degrades_instead_of_failing(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Free-tier accounts must work out of the box: when Steel rejects
-        paid features with 402, retry without them and record the
+        CAPTCHA solving with 402, retry without it and record the
         degradation so the session note can tell the user how to unlock."""
         monkeypatch.setenv("STEEL_API_KEY", "secret")
-        monkeypatch.setenv("STEEL_USE_PROXY", "true")
         monkeypatch.setenv("STEEL_SOLVE_CAPTCHA", "true")
         rejection = FakeResponse(
             402,
             {
                 "error": "Payment Required",
-                "message": "Steel proxies are not available on the hobby plan.",
+                "message": "CAPTCHA solving is not available on the hobby plan.",
             },
         )
         with patch.object(
@@ -214,18 +213,17 @@ class TestCreateSession:
             session = SteelBrowserProvider().create_session("task-degrade")
 
         retry_body = post.call_args_list[1].kwargs["json"]
-        assert "useProxy" not in retry_body
         assert "solveCaptcha" not in retry_body
         assert session["features"]["proxy"] is False
         assert session["features"]["captcha_solving"] is False
-        assert session["degraded_features"] == ["proxy", "captcha_solving"]
+        assert session["degraded_features"] == ["captcha_solving"]
         assert "hobby plan" in session["degradation_reason"]
 
-    def test_402_degradation_reports_only_requested_features(
+    def test_402_degradation_reports_only_requested_captcha(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv("STEEL_API_KEY", "secret")
-        monkeypatch.setenv("STEEL_USE_PROXY", "true")
+        monkeypatch.setenv("STEEL_SOLVE_CAPTCHA", "1")
         with patch.object(
             steel_module.requests,
             "post",
@@ -235,42 +233,38 @@ class TestCreateSession:
             ],
         ):
             session = SteelBrowserProvider().create_session("task-degrade-2")
-        assert session["degraded_features"] == ["proxy"]
+        assert session["degraded_features"] == ["captcha_solving"]
 
-    def test_features_report_actual_granted_state_from_response(
+    def test_features_report_actual_captcha_state_from_response(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Report what Steel granted (proxySource/solveCaptcha), not what we
-        asked for — the account may silently run without a requested feature."""
+        """Report what Steel granted (solveCaptcha), not what we asked for —
+        the account may silently run without a requested feature."""
         monkeypatch.setenv("STEEL_API_KEY", "secret")
-        monkeypatch.setenv("STEEL_USE_PROXY", "true")
         monkeypatch.setenv("STEEL_SOLVE_CAPTCHA", "true")
         granted = {
             "id": "s1",
             "websocketUrl": "wss://connect.steel.dev?sessionId=s1",
-            "proxySource": "steel",
             "solveCaptcha": True,
         }
         with patch.object(
             steel_module.requests, "post", return_value=FakeResponse(200, granted)
         ):
             session = SteelBrowserProvider().create_session("task-granted")
-        assert session["features"]["proxy"] is True
+        assert session["features"]["proxy"] is False
         assert session["features"]["captcha_solving"] is True
         assert "degraded_features" not in session
 
-    def test_silently_dropped_proxy_is_reported_as_degraded(
+    def test_silently_dropped_captcha_is_reported_as_degraded(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Steel returns 200 but omits the proxy (proxySource null) instead of
-        402 — the session runs without it, so say so honestly."""
+        """Steel returns 200 but reports solveCaptcha false instead of 402 —
+        the session runs without it, so say so honestly."""
         monkeypatch.setenv("STEEL_API_KEY", "secret")
-        monkeypatch.setenv("STEEL_USE_PROXY", "true")
         monkeypatch.setenv("STEEL_SOLVE_CAPTCHA", "true")
         silently_dropped = {
             "id": "s1",
             "websocketUrl": "wss://connect.steel.dev?sessionId=s1",
-            "proxySource": None,
             "solveCaptcha": False,
         }
         with patch.object(
@@ -279,17 +273,16 @@ class TestCreateSession:
             return_value=FakeResponse(200, silently_dropped),
         ):
             session = SteelBrowserProvider().create_session("task-dropped")
-        assert session["features"]["proxy"] is False
         assert session["features"]["captcha_solving"] is False
-        assert set(session["degraded_features"]) == {"proxy", "captcha_solving"}
+        assert session["degraded_features"] == ["captcha_solving"]
 
-    def test_absent_state_fields_fall_back_to_requested(
+    def test_absent_captcha_state_falls_back_to_requested(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Self-hosted / older Steel may omit proxySource entirely — don't
+        """Self-hosted / older Steel may omit solveCaptcha entirely — don't
         cry degradation when we simply can't verify."""
         monkeypatch.setenv("STEEL_API_KEY", "secret")
-        monkeypatch.setenv("STEEL_USE_PROXY", "true")
+        monkeypatch.setenv("STEEL_SOLVE_CAPTCHA", "true")
         payload = {
             "id": "s1",
             "websocketUrl": "wss://connect.steel.dev?sessionId=s1",
@@ -298,7 +291,7 @@ class TestCreateSession:
             steel_module.requests, "post", return_value=FakeResponse(200, payload)
         ):
             session = SteelBrowserProvider().create_session("task-absent")
-        assert session["features"]["proxy"] is True
+        assert session["features"]["captcha_solving"] is True
         assert "degraded_features" not in session
 
     def test_402_without_features_raises_with_pricing_pointer(
@@ -315,7 +308,7 @@ class TestCreateSession:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv("STEEL_API_KEY", "secret")
-        monkeypatch.setenv("STEEL_USE_PROXY", "true")
+        monkeypatch.setenv("STEEL_SOLVE_CAPTCHA", "true")
         with patch.object(
             steel_module.requests,
             "post",
@@ -332,6 +325,11 @@ class TestCreateSession:
     ) -> None:
         monkeypatch.setenv("STEEL_API_KEY", "secret")
         monkeypatch.setenv("STEEL_USE_PROXY", "true")
+        monkeypatch.setenv("STEEL_PROXY_COUNTRY", "DE")
+        monkeypatch.setenv("DATAIMPULSE_PROXY_HOST", "gw.dataimpulse.com")
+        monkeypatch.setenv("DATAIMPULSE_PROXY_PORT", "823")
+        monkeypatch.setenv("DATAIMPULSE_PROXY_USERNAME", "login")
+        monkeypatch.setenv("DATAIMPULSE_PROXY_PASSWORD", "pass")
         monkeypatch.setenv("STEEL_SOLVE_CAPTCHA", "1")
         monkeypatch.setenv("STEEL_SESSION_TIMEOUT", "600000")
 
@@ -343,7 +341,9 @@ class TestCreateSession:
             session = SteelBrowserProvider().create_session("task-2")
 
         body = post.call_args.kwargs["json"]
-        assert body["useProxy"] is True
+        assert "useProxy" not in body
+        assert body["proxyUrl"].startswith("http://")
+        assert "login__cr.de" in body["proxyUrl"]
         assert body["solveCaptcha"] is True
         assert body["timeout"] == 600000
         assert session["features"] == {
@@ -566,10 +566,15 @@ class TestHermesConfigKnobs:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path
     ) -> None:
         monkeypatch.setenv("STEEL_API_KEY", "secret")
+        monkeypatch.setenv("DATAIMPULSE_PROXY_HOST", "gw.dataimpulse.com")
+        monkeypatch.setenv("DATAIMPULSE_PROXY_PORT", "823")
+        monkeypatch.setenv("DATAIMPULSE_PROXY_USERNAME", "login")
+        monkeypatch.setenv("DATAIMPULSE_PROXY_PASSWORD", "pass")
         self._write_config(
             tmp_path,
             monkeypatch,
             "browser:\n  steel:\n    use_proxy: true\n"
+            "    proxy_country: DE\n"
             "    solve_captcha: true\n    session_timeout: 900000\n",
         )
         with patch.object(
@@ -579,7 +584,8 @@ class TestHermesConfigKnobs:
         ) as post:
             session = SteelBrowserProvider().create_session("task-cfg")
         body = post.call_args.kwargs["json"]
-        assert body["useProxy"] is True
+        assert "useProxy" not in body
+        assert "login__cr.de" in body["proxyUrl"]
         assert body["solveCaptcha"] is True
         assert body["timeout"] == 900000
         assert session["features"] == {
@@ -814,3 +820,90 @@ class TestRegistrySelection:
         register_provider(SteelBrowserProvider())
         monkeypatch.setenv("STEEL_API_KEY", "k")
         assert _resolve(None) is None
+
+
+# ---------------------------------------------------------------------------
+# Dataimpulse proxy session payload
+# ---------------------------------------------------------------------------
+
+
+class TestDataimpulseSessionPayload:
+    def _proxy_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("STEEL_API_KEY", "secret")
+        monkeypatch.setenv("STEEL_USE_PROXY", "true")
+        monkeypatch.setenv("STEEL_PROXY_COUNTRY", "DE")
+        monkeypatch.setenv("DATAIMPULSE_PROXY_HOST", "gw.dataimpulse.com")
+        monkeypatch.setenv("DATAIMPULSE_PROXY_PORT", "823")
+        monkeypatch.setenv("DATAIMPULSE_PROXY_USERNAME", "login")
+        monkeypatch.setenv("DATAIMPULSE_PROXY_PASSWORD", "p@ss:w/rd?")
+
+    def test_proxy_disabled_by_default_has_no_proxy_parameters(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("STEEL_API_KEY", "secret")
+        with patch.object(
+            steel_module.requests,
+            "post",
+            return_value=FakeResponse(200, _ok_session_payload()),
+        ) as post:
+            SteelBrowserProvider().create_session("task-no-proxy")
+        body = post.call_args.kwargs["json"]
+        assert "proxyUrl" not in body
+        assert "useProxy" not in body
+
+    def test_disabling_after_enabling_removes_proxy_from_next_session(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from hermes_steel import config
+
+        self._proxy_env(monkeypatch)
+        with patch.object(
+            steel_module.requests,
+            "post",
+            side_effect=[
+                FakeResponse(200, _ok_session_payload()),
+                FakeResponse(200, _ok_session_payload()),
+            ],
+        ) as post:
+            provider = SteelBrowserProvider()
+            provider.create_session("task-toggle")
+            assert "proxyUrl" in post.call_args_list[0].kwargs["json"]
+
+            config.set_session_override("use_proxy", False, "task-toggle")
+            provider.create_session("task-toggle")
+            assert "proxyUrl" not in post.call_args_list[1].kwargs["json"]
+
+    def test_missing_country_fails_before_creating_a_session(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._proxy_env(monkeypatch)
+        monkeypatch.delenv("STEEL_PROXY_COUNTRY")
+        with patch.object(steel_module.requests, "post") as post:
+            with pytest.raises(ValueError, match="proxy_country"):
+                SteelBrowserProvider().create_session("task-no-country")
+        post.assert_not_called()
+
+    def test_missing_proxy_credentials_fail_before_creating_a_session(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._proxy_env(monkeypatch)
+        monkeypatch.delenv("DATAIMPULSE_PROXY_PASSWORD")
+        with patch.object(steel_module.requests, "post") as post:
+            with pytest.raises(ValueError, match="DATAIMPULSE_PROXY_PASSWORD"):
+                SteelBrowserProvider().create_session("task-no-creds")
+        post.assert_not_called()
+
+    def test_proxy_rejection_never_falls_back_to_direct_browsing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._proxy_env(monkeypatch)
+        with patch.object(
+            steel_module.requests,
+            "post",
+            return_value=FakeResponse(402, {"message": "proxy rejected"}),
+        ) as post:
+            with pytest.raises(RuntimeError, match="proxy was not removed"):
+                SteelBrowserProvider().create_session("task-proxy-402")
+        assert post.call_count == 1
+        assert "proxyUrl" in post.call_args.kwargs["json"]
+        assert "p@ss:w/rd?" not in str(post.call_args.kwargs["json"]["proxyUrl"])

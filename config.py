@@ -5,24 +5,79 @@
 from __future__ import annotations
 
 import os
-from typing import Optional
+import re
+import threading
+from typing import Any, Dict, Optional
 from urllib.parse import urlsplit
 
 DEFAULT_BASE_URL = "https://api.steel.dev"
 
-# Agent-set per-process overrides (highest precedence), written by the
-# steel_session_options tool so the agent can tune proxy / CAPTCHA per site.
-# Process-global, like the env vars and config values it overrides; keyed by
-# the same names as the browser.steel.* config keys, values are "true"/"false".
-_session_overrides: dict = {}
+try:
+    from agent.secret_scope import get_secret as _get_secret
+except Exception:  # older Hermes hosts have no profile-scoped secret resolver
+    _get_secret = os.environ.get
+
+# Agent-set overrides, written by steel_session_options so the agent can tune
+# proxy / CAPTCHA per site. Keyed by task_id: the multiplexed gateway serves
+# several agents from one process, so an unscoped setting would leak between
+# them. Values are strings, same encoding as the env/config fallbacks.
+_session_overrides: Dict[str, Dict[str, str]] = {}
+_session_overrides_lock = threading.Lock()
 
 
-def set_session_override(config_name: str, value: Optional[bool]) -> None:
-    """Set (or, with ``None``, clear) an agent override for a knob."""
-    if value is None:
-        _session_overrides.pop(config_name, None)
-    else:
-        _session_overrides[config_name] = "true" if value else "false"
+def secret_value(name: str, default: Optional[str] = None) -> Optional[str]:
+    """Read a credential through the host's profile-scoped secret resolver."""
+    return _get_secret(name, default)
+
+
+def _session_key(task_id: Optional[str]) -> str:
+    return task_id or "default"
+
+
+def set_session_override(
+    config_name: str, value: Any, task_id: Optional[str] = None
+) -> None:
+    """Set (or, with ``None``, clear) an agent override for one task."""
+    key = _session_key(task_id)
+    with _session_overrides_lock:
+        if value is None:
+            bucket = _session_overrides.get(key)
+            if bucket is not None:
+                bucket.pop(config_name, None)
+                if not bucket:
+                    _session_overrides.pop(key, None)
+            return
+        if isinstance(value, bool):
+            encoded = "true" if value else "false"
+        else:
+            encoded = str(value)
+        _session_overrides.setdefault(key, {})[config_name] = encoded
+
+
+def get_session_override(
+    config_name: str, task_id: Optional[str] = None
+) -> Optional[str]:
+    """Return the task's agent override for a knob, if any."""
+    with _session_overrides_lock:
+        return _session_overrides.get(_session_key(task_id), {}).get(config_name)
+
+
+def clear_session_overrides(task_id: Optional[str] = None) -> None:
+    """Drop every agent override for one task."""
+    with _session_overrides_lock:
+        _session_overrides.pop(_session_key(task_id), None)
+
+
+def _steel_config() -> Dict[str, Any]:
+    """Return the ``browser.steel`` config mapping (empty when unavailable)."""
+    try:
+        from hermes_cli.config import load_config
+
+        cfg = load_config() or {}
+        steel_cfg = (cfg.get("browser") or {}).get("steel") or {}
+        return steel_cfg if isinstance(steel_cfg, dict) else {}
+    except Exception:
+        return {}
 
 
 def _hermes_config_value(name: str) -> Optional[str]:
@@ -34,28 +89,24 @@ def _hermes_config_value(name: str) -> Optional[str]:
 
     Fail-open: any problem reading the host config means "not configured".
     """
-    try:
-        from hermes_cli.config import load_config
-
-        cfg = load_config() or {}
-        steel_cfg = (cfg.get("browser") or {}).get("steel") or {}
-        value = steel_cfg.get(name)
-        return None if value is None else str(value)
-    except Exception:
-        return None
+    value = _steel_config().get(name)
+    return None if value is None else str(value)
 
 
-def steel_setting(env_key: str, config_name: str) -> Optional[str]:
+def steel_setting(
+    env_key: str, config_name: str, task_id: Optional[str] = None
+) -> Optional[str]:
     """Resolve a knob by precedence: agent override → env var → config.
 
     The agent override (steel_session_options) wins so the model can tune a
-    session for the site in front of it. The env var is a process-level
-    override and the historic interface; config.yaml is the recommended,
-    hermes-native home for a persistent default.
+    session for the site in front of it, but only for that task. The env var is
+    a profile-scoped secret override and the historic interface; config.yaml is
+    the recommended, hermes-native home for a persistent default.
     """
-    if config_name in _session_overrides:
-        return _session_overrides[config_name]
-    env_value = (os.environ.get(env_key) or "").strip()
+    override = get_session_override(config_name, task_id)
+    if override is not None:
+        return override
+    env_value = (secret_value(env_key) or "").strip()
     if env_value:
         return env_value
     return _hermes_config_value(config_name)
@@ -67,7 +118,7 @@ def steel_api_key() -> Optional[str]:
     Deliberately env-only (``~/.hermes/.env`` or the process environment):
     secrets don't belong in config.yaml.
     """
-    return (os.environ.get("STEEL_API_KEY") or "").strip() or None
+    return (secret_value("STEEL_API_KEY") or "").strip() or None
 
 
 def steel_base_url() -> str:
@@ -102,3 +153,4 @@ def custom_base_url() -> Optional[str]:
     """Return a custom self-hosted base URL, or ``None`` for Steel cloud."""
     base_url = steel_base_url()
     return None if is_default_cloud_url(base_url) else base_url
+

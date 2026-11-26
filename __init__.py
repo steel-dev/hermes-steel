@@ -30,14 +30,15 @@ def register(ctx) -> None:
         schema=session_options.STEEL_SESSION_OPTIONS_SCHEMA,
         handler=lambda args, **kw: session_options.steel_session_options(
             use_proxy=args.get("use_proxy"),
+            proxy_country=args.get("proxy_country"),
             solve_captcha=args.get("solve_captcha"),
             task_id=kw.get("task_id"),
         ),
         check_fn=scrape_tool.check_steel_scrape_requirements,
         requires_env=[],
         description=(
-            "Tune the Steel session's proxy / CAPTCHA solving for the current "
-            "site, then start a fresh session"
+            "Tune the Steel session's Dataimpulse proxy / country / CAPTCHA "
+            "solving for the current task, then start a fresh session"
         ),
     )
 
