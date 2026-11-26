@@ -23,6 +23,11 @@ Config keys this provider responds to::
 
     browser:
       cloud_provider: "steel"
+      steel:
+        credentials:
+          enabled: true
+          namespace: production-agent-a
+          origins: ["https://example.com"]
 
 Cloud auth env vars::
 
@@ -61,6 +66,7 @@ from .config import (
     is_default_cloud_url,
     steel_api_key,
     steel_base_url,
+    steel_credentials_config,
     steel_setting,
 )
 from .dataimpulse import build_dataimpulse_proxy_url
@@ -213,6 +219,11 @@ class SteelBrowserProvider(BrowserProvider):
             )
         if enable_captcha:
             session_config["solveCaptcha"] = True
+
+        credentials = steel_credentials_config()
+        if credentials:
+            session_config["namespace"] = credentials["namespace"]
+            session_config["credentials"] = {"origins": credentials["origins"]}
 
         custom_timeout_ms = steel_setting(
             "STEEL_SESSION_TIMEOUT", "session_timeout", task_id

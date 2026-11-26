@@ -823,6 +823,123 @@ class TestRegistrySelection:
 
 
 # ---------------------------------------------------------------------------
+# Steel Credentials API (browser.steel.credentials)
+# ---------------------------------------------------------------------------
+
+
+class TestCredentialsConfig:
+    def _write_config(self, tmp_path, monkeypatch, body: str) -> None:
+        home = tmp_path / "hermes-home-credentials"
+        home.mkdir(exist_ok=True)
+        (home / "config.yaml").write_text(body)
+        monkeypatch.setenv("HERMES_HOME", str(home))
+
+    def test_enabled_config_passes_namespace_and_origins(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        monkeypatch.setenv("STEEL_API_KEY", "secret")
+        self._write_config(
+            tmp_path,
+            monkeypatch,
+            "browser:\n  steel:\n    credentials:\n      enabled: true\n"
+            "      namespace: production-agent-a\n"
+            "      origins:\n        - https://example.com\n"
+            "        - https://admin.example.com\n",
+        )
+        with patch.object(
+            steel_module.requests,
+            "post",
+            return_value=FakeResponse(200, _ok_session_payload()),
+        ) as post:
+            SteelBrowserProvider().create_session("task-creds")
+
+        body = post.call_args.kwargs["json"]
+        assert body["namespace"] == "production-agent-a"
+        assert body["credentials"] == {
+            "origins": ["https://example.com", "https://admin.example.com"]
+        }
+
+    def test_origins_are_normalized(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        monkeypatch.setenv("STEEL_API_KEY", "secret")
+        self._write_config(
+            tmp_path,
+            monkeypatch,
+            "browser:\n  steel:\n    credentials:\n      enabled: true\n"
+            "      origins:\n        - HTTPS://Example.COM/\n",
+        )
+        with patch.object(
+            steel_module.requests,
+            "post",
+            return_value=FakeResponse(200, _ok_session_payload()),
+        ) as post:
+            SteelBrowserProvider().create_session("task-creds-normalized")
+        body = post.call_args.kwargs["json"]
+        assert body["credentials"]["origins"] == ["https://example.com"]
+        assert body["namespace"] == "default"
+
+    @pytest.mark.parametrize(
+        "config_body",
+        [
+            "browser:\n  steel:\n    credentials:\n      enabled: false\n"
+            "      origins:\n        - https://example.com\n",
+            "browser:\n  steel:\n    credentials:\n"
+            "      origins:\n        - https://example.com\n",
+            "browser:\n  steel:\n    use_proxy: false\n",
+        ],
+    )
+    def test_disabled_or_absent_credentials_add_nothing(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path,
+        config_body: str,
+    ) -> None:
+        monkeypatch.setenv("STEEL_API_KEY", "secret")
+        self._write_config(tmp_path, monkeypatch, config_body)
+        with patch.object(
+            steel_module.requests,
+            "post",
+            return_value=FakeResponse(200, _ok_session_payload()),
+        ) as post:
+            SteelBrowserProvider().create_session("task-creds-off")
+        body = post.call_args.kwargs["json"]
+        assert "namespace" not in body
+        assert "credentials" not in body
+
+    @pytest.mark.parametrize(
+        "credentials_yaml",
+        [
+            "      enabled: true\n",
+            "      enabled: true\n      origins: []\n",
+            "      enabled: true\n      origins: https://example.com\n",
+            "      enabled: true\n      origins:\n        - example.com\n",
+            "      enabled: true\n      origins:\n"
+            "        - https://user:pass@example.com\n",
+            "      enabled: true\n      origins:\n"
+            "        - https://example.com/path\n",
+            "      enabled: true\n      origins:\n"
+            "        - https://example.com?q=1\n",
+            "      enabled: true\n      origins:\n"
+            "        - https://example.com\n      namespace: ..\n",
+        ],
+    )
+    def test_invalid_credentials_config_fails_before_session_creation(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path, credentials_yaml: str
+    ) -> None:
+        monkeypatch.setenv("STEEL_API_KEY", "secret")
+        self._write_config(
+            tmp_path,
+            monkeypatch,
+            "browser:\n  steel:\n    credentials:\n" + credentials_yaml,
+        )
+        with patch.object(steel_module.requests, "post") as post:
+            with pytest.raises(ValueError, match="credentials"):
+                SteelBrowserProvider().create_session("task-creds-invalid")
+        post.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
 # Dataimpulse proxy session payload
 # ---------------------------------------------------------------------------
 

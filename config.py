@@ -154,3 +154,82 @@ def custom_base_url() -> Optional[str]:
     base_url = steel_base_url()
     return None if is_default_cloud_url(base_url) else base_url
 
+
+_NAMESPACE_RE = re.compile(r"^[A-Za-z0-9_.:-]+$")
+
+
+def _validate_namespace(value: object) -> str:
+    namespace = str(value or "").strip()
+    if not namespace:
+        return "default"
+    if (
+        namespace in (".", "..")
+        or len(namespace) > 128
+        or not _NAMESPACE_RE.fullmatch(namespace)
+    ):
+        raise ValueError(
+            "browser.steel.credentials.namespace is invalid: use letters, "
+            "digits, '_', '.', ':' or '-' (not '.' or '..')."
+        )
+    return namespace
+
+
+def _validate_origin(value: object) -> str:
+    origin = str(value or "").strip()
+    try:
+        parsed = urlsplit(origin)
+        port = parsed.port
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"browser.steel.credentials.origins contains an invalid origin: {origin!r}"
+        ) from exc
+    if (
+        parsed.scheme.casefold() not in ("http", "https")
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or parsed.path.rstrip("/")
+    ):
+        raise ValueError(
+            f"browser.steel.credentials.origins contains an invalid origin: "
+            f"{origin!r} (expected scheme://host[:port])"
+        )
+    host = parsed.hostname.casefold()
+    if ":" in host:
+        host = f"[{host}]"
+    return f"{parsed.scheme.casefold()}://{host}{f':{port}' if port else ''}"
+
+
+def steel_credentials_config() -> Optional[Dict[str, Any]]:
+    """Return the session credential config, or ``None`` when disabled.
+
+    Example::
+
+        browser:
+          steel:
+            credentials:
+              enabled: true
+              namespace: production-agent-a
+              origins:
+                - https://example.com
+    """
+    raw = _steel_config().get("credentials")
+    if not isinstance(raw, dict):
+        return None
+    enabled = raw.get("enabled")
+    if not (enabled is True or str(enabled).strip().lower() in ("1", "true", "yes")):
+        return None
+
+    origins_raw = raw.get("origins")
+    if not isinstance(origins_raw, list) or not origins_raw:
+        raise ValueError(
+            "browser.steel.credentials.origins must be a non-empty list of "
+            "explicit origins when credentials are enabled."
+        )
+    origins = [_validate_origin(origin) for origin in origins_raw]
+    return {
+        "namespace": _validate_namespace(raw.get("namespace")),
+        "origins": origins,
+    }

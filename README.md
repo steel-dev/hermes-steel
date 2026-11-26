@@ -4,6 +4,12 @@
 
 Give [Hermes Agent](https://github.com/NousResearch/hermes-agent) a cloud browser: this plugin routes Hermes' browser automation through [Steel](https://steel.dev), with a live viewer for every session and a standalone `steel_scrape` tool for one-shot page extraction.
 
+This is the Stormsail fork of `steel-dev/hermes-steel`. Differences from upstream:
+
+- **Dataimpulse proxy** — per-task `proxyUrl`, country selected per session, disabled by default.
+- **Steel Credentials API** — optional namespace-scoped credential injection with an origins allowlist.
+- Everything else (browser tools, viewer links, recordings, traces, `steel_scrape`) is unchanged.
+
 ## Quickstart
 
 You need [Hermes Agent](https://github.com/NousResearch/hermes-agent) 0.18.0+ and a [Steel account](https://app.steel.dev) — the free plan is fine.
@@ -50,14 +56,91 @@ hermes config set browser.steel.solve_captcha true
 | `browser.steel.use_proxy` | `STEEL_USE_PROXY` | `false` | Residential proxy for sessions and scrapes |
 | `browser.steel.solve_captcha` | `STEEL_SOLVE_CAPTCHA` | `false` | CAPTCHA solving |
 | `browser.steel.session_timeout` | `STEEL_SESSION_TIMEOUT` | `1800000` (30 min) | Session hard cap in milliseconds |
+| `browser.steel.proxy_country` | `STEEL_PROXY_COUNTRY` | none | Default Dataimpulse country; required when proxy is enabled |
+| `browser.steel.credentials.*` | — | disabled | Steel Credentials API config (see below) |
 
 The 30-minute default replaces Steel's own 5-minute one, which kills long agent tasks mid-flight; the plugin also sets a 10-minute server-side inactivity timeout as crash insurance.
 
-Precedence is **agent override → env var → config → default**: the agent's per-session choices (via `steel_session_options`) win, then `STEEL_*` env vars, then `browser.steel.*` config. So config sets your persistent baseline while the agent tunes individual sessions on top of it.
+Precedence is **agent override → env var → config → default**. Agent overrides are keyed by task, so concurrent agents never inherit each other's proxy/country/CAPTCHA choices.
+
+### Dataimpulse proxy
+
+Proxy is **disabled by default**: no `proxyUrl` and no Dataimpulse credentials are sent. The agent enables it per task with `steel_session_options`; changing the setting closes the current session, and the next `browser_*` call uses the new one.
+
+```json
+{"use_proxy": true, "proxy_country": "de"}
+```
+
+```json
+{"use_proxy": false}
+```
+
+`proxy_country` is an ISO 3166-1 alpha-2 code (normalized to uppercase). The Dataimpulse username is `LOGIN__cr.<country.lower()>;anon.1`; username and password are URL-encoded into Steel's `proxyUrl`. A proxy request that fails never falls back to direct browsing.
+
+Required environment variables (profile `.env` or deployment secrets):
+
+```env
+DATAIMPULSE_PROXY_HOST=
+DATAIMPULSE_PROXY_PORT=
+DATAIMPULSE_PROXY_USERNAME=
+DATAIMPULSE_PROXY_PASSWORD=
+```
+
+### Steel Credentials API
+
+Credentials are injected only when explicitly enabled, with an explicit origins allowlist. The agent never sees stored values.
+
+```yaml
+browser:
+  cloud_provider: steel
+  steel:
+    credentials:
+      enabled: true
+      namespace: production-agent-a
+      origins:
+        - https://example.com
+        - https://admin.example.com
+```
+
+Steel returns filled passwords masked in snapshots (and blurs the fields), but recordings/live view can still show the authenticated flow. Store only the credentials each profile needs, and use a distinct namespace per profile.
+
+Provision credentials from a developer machine (values come from env or a TTY prompt, never printed):
+
+```bash
+export STEEL_API_KEY=...
+export STEEL_CREDENTIAL_USERNAME=...
+export STEEL_CREDENTIAL_PASSWORD=...
+scripts/sync-steel-credentials.py list --namespace production-agent-a
+scripts/sync-steel-credentials.py create --origin https://example.com --namespace production-agent-a
+scripts/sync-steel-credentials.py update --origin https://example.com --namespace production-agent-a
+scripts/sync-steel-credentials.py delete --origin https://example.com --namespace production-agent-a
+```
 
 **Self-hosted Steel:** point `STEEL_BASE_URL` at your deployment. The API key becomes optional — when set, it is forwarded; when not, requests carry no credentials. `steel_scrape` follows the same rules.
 
 ## Managing the plugin
+
+### Private fork install
+
+```bash
+export GH_TOKEN=...   # Contents: read on Stormsail/hermes-steel
+hermes plugins remove browser-steel
+hermes plugins install Stormsail/hermes-steel \
+    --ref <40-character-commit-sha> --no-enable --no-deps
+hermes plugins enable browser-steel
+```
+
+Pin the SHA; do not install from a branch. The init container in the infrastructure repo does this for every profile.
+
+### Upstream sync
+
+```bash
+git remote add upstream https://github.com/steel-dev/hermes-steel
+git fetch upstream
+git merge upstream/main
+```
+
+Run the tests, then bump the pinned SHA in the init-container script.
 
 ```bash
 hermes plugins update browser-steel     # pull the latest version
