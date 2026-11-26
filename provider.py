@@ -270,7 +270,11 @@ class SteelBrowserProvider(BrowserProvider):
         degraded_features: list = []
         degradation_reason = ""
         if response.status_code == 402 and enable_captcha:
-            degradation_reason = _api_error_message(response)
+            degradation_reason = (
+                "Steel rejected CAPTCHA solving for the proxy session (HTTP 402)."
+                if requested_proxy
+                else _api_error_message(response)
+            )
             degraded_features = ["captcha_solving"]
             session_config.pop("solveCaptcha", None)
             enable_captcha = False
@@ -282,11 +286,14 @@ class SteelBrowserProvider(BrowserProvider):
             response = _post_session(session_config)
 
         if not response.ok:
-            if response.status_code == 402 and requested_proxy:
+            if requested_proxy:
+                # Never echo the Steel response for a proxy session: it must
+                # not be possible for proxyUrl or credentials to reach logs.
                 raise RuntimeError(
-                    "Steel rejected the Dataimpulse proxy session (HTTP 402). "
-                    "The proxy was not removed, so no direct session was "
-                    "created. Check the Steel account plan or proxy settings."
+                    "Failed to create the Steel proxy session: "
+                    f"HTTP {response.status_code}. The proxy was not removed, "
+                    "so no direct session was created. Check the Dataimpulse "
+                    "credentials, country, and Steel account plan."
                 )
             message = (
                 f"Failed to create Steel session: "
